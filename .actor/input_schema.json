@@ -36,8 +36,8 @@
     "sessionIds": {
       "title": "Multiple Session IDs (for rotation)",
       "type": "array",
-      "description": "Add 2-3 Instagram sessionid values for rotation — avoids rate limits when processing many accounts",
-      "editor": "stringList",
+      "description": "Add 2-3 Instagram sessionid values for rotation — avoids rate limits when processing many accounts. Example: [\"id1\", \"id2\"]",
+      "editor": "json",
       "isSecret": true
     },
     "proxyConfig": {
