@@ -1,0 +1,17 @@
+{
+  "name": "instagram-latest-posts",
+  "version": "1.0.0",
+  "description": "Extract latest posts (video_url, caption, thumbnail) from any public Instagram profile",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node src/main.js"
+  },
+  "dependencies": {
+    "apify": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
