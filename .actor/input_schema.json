@@ -25,30 +25,6 @@
       "description": "If false, only video/reels are returned",
       "default": false,
       "editor": "checkbox"
-    },
-    "sessionId": {
-      "title": "Instagram Session ID",
-      "type": "string",
-      "description": "Your Instagram sessionid cookie. Required for reliable results on datacenter IPs. Get it from: Chrome → F12 → Application → Cookies → instagram.com → sessionid",
-      "editor": "textfield",
-      "isSecret": true
-    },
-    "sessionIds": {
-      "title": "Multiple Session IDs (for rotation)",
-      "type": "array",
-      "description": "Add 2-3 Instagram sessionid values for rotation — avoids rate limits when processing many accounts. Example: [\"id1\", \"id2\"]",
-      "editor": "json",
-      "isSecret": true
-    },
-    "proxyConfig": {
-      "title": "Proxy Configuration",
-      "type": "object",
-      "description": "Apify Proxy settings for avoiding rate limits",
-      "editor": "proxy",
-      "default": {
-        "useApifyProxy": true,
-        "apifyProxyGroups": ["RESIDENTIAL"]
-      }
     }
   },
   "required": ["usernames"]
