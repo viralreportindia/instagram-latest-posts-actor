@@ -155,43 +155,60 @@ async function getInstagramCookies(proxyConfig, attempt = 0, sessionId = null) {
   }
 }
 
-// Fetch user profile from Instagram API
+// Fetch user profile from Instagram API - tries multiple endpoints
 async function fetchUser(username, cookies, appId, ua, proxyConfig) {
-  const options = {
-    headers: {
-      'X-IG-App-ID': appId,
-      'User-Agent': ua,
-      'Referer': 'https://www.instagram.com/',
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Cookie': cookies,
+  // Try multiple endpoints — mobile subdomain is less blocked
+  const endpoints = [
+    `https://i.instagram.com/api/v1/users/web_profile_info/?username=${username}`,
+    `https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`,
+  ]
+
+  for (const endpoint of endpoints) {
+    // First try WITHOUT proxy (direct Apify IP)
+    // Then try WITH proxy
+    const attempts = [false, true]
+    for (const useProxy of attempts) {
+      try {
+        const options = {
+          headers: {
+            'X-IG-App-ID': appId,
+            'User-Agent': ua,
+            'Referer': 'https://www.instagram.com/',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Cookie': cookies,
+            'X-Requested-With': 'XMLHttpRequest',
+          }
+        }
+
+        if (useProxy && proxyConfig) {
+          try {
+            const proxyUrl = await proxyConfig.newUrl()
+            if (proxyUrl) {
+              const { ProxyAgent } = await import('undici')
+              options.dispatcher = new ProxyAgent(proxyUrl)
+            }
+          } catch { }
+        }
+
+        const res = await fetch(endpoint, options)
+        if (!res.ok) {
+          console.log(`  Status: ${res.status} (${appId.slice(0, 6)}... proxy:${useProxy})`)
+          continue
+        }
+
+        const text = await res.text()
+        if (!text?.trim()) continue
+        const data = JSON.parse(text)
+        const user = data?.data?.user
+        if (user) {
+          console.log(`  ✅ Got data via ${endpoint.includes('i.instagram') ? 'mobile' : 'web'} API`)
+          return user
+        }
+      } catch { continue }
     }
   }
-
-  if (proxyConfig) {
-    try {
-      const proxyUrl = await proxyConfig.newUrl()
-      if (proxyUrl) {
-        const { ProxyAgent } = await import('undici')
-        options.dispatcher = new ProxyAgent(proxyUrl)
-      }
-    } catch { }
-  }
-
-  const res = await fetch(
-    `https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`,
-    options
-  )
-
-  if (!res.ok) {
-    console.log(`  Status: ${res.status} (${appId.slice(0, 6)}...)`)
-    return null
-  }
-
-  const text = await res.text()
-  if (!text?.trim()) return null
-  const data = JSON.parse(text)
-  return data?.data?.user || null
+  return null
 }
 
 // Extract posts from user data
