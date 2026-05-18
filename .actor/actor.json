@@ -1,11 +1,10 @@
 {
   "actorSpecification": 1,
   "name": "instagram-latest-posts",
-  "title": "Instagram Latest Posts Scraper",
-  "description": "Extract latest video posts from any public Instagram profile. Returns post ID, caption, video URL, and thumbnail URL. No login required.",
+  "title": "Instagram Profile Scraper — Latest Posts, Reels & Video URLs",
+  "description": "Scrape latest posts, reels, and videos from any public Instagram profile. Extracts post ID, caption, direct video URL, thumbnail URL, views, and likes — no login or API key required. Perfect for social media automation, content monitoring, cross-posting to Facebook/YouTube, and building Instagram analytics tools.",
   "version": "1.0",
   "input": "./input_schema.json",
-  "dockerfile": "./Dockerfile",
   "categories": ["SOCIAL_MEDIA"],
   "readme": "./README.md"
 }
