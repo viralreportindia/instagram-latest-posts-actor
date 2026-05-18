@@ -21,99 +21,87 @@ const {
   usernames = [],
   count = 3,
   includeImages = false,
+  sessionId = '',       // Single Instagram sessionid cookie
+  sessionIds = [],      // Multiple session IDs for rotation
 } = input
 
 if (!usernames || usernames.length === 0) {
   throw new Error('Please provide at least one Instagram username!')
 }
 
-// Setup proxy — try Apify proxy, fallback to direct
-let proxyConfiguration = null
-try {
-  proxyConfiguration = await Actor.createProxyConfiguration({
-    useApifyProxy: true,
-    // Use datacenter (free) first, residential if available
-  })
-  console.log('Proxy configured ✅')
-} catch {
-  console.log('No proxy available, using direct connection')
+// Build session pool for rotation
+const SESSION_POOL = [sessionId, ...sessionIds].filter(s => s && s.trim())
+
+if (SESSION_POOL.length > 0) {
+  console.log(`✅ Using ${SESSION_POOL.length} session ID(s) — rate limit bypass active!`)
+} else {
+  console.log('⚠️  No sessionId — may hit 429 on datacenter IPs. Add sessionId to input!')
 }
 
-console.log(`Processing ${usernames.length} username(s)...`)
+// Setup Apify proxy
+let proxyConfiguration = null
+try {
+  proxyConfiguration = await Actor.createProxyConfiguration({ useApifyProxy: true })
+  console.log('Proxy configured ✅')
+} catch {
+  console.log('No proxy, using direct connection')
+}
 
-for (const username of usernames) {
-  console.log(`\n📷 Fetching: @${username}`)
+console.log(`\nProcessing ${usernames.length} username(s)...\n`)
+
+for (let idx = 0; idx < usernames.length; idx++) {
+  const username = usernames[idx]
+  console.log(`📷 Fetching: @${username}`)
+
+  // Pick session ID for this user (round-robin)
+  const sessionForUser = SESSION_POOL.length > 0
+    ? SESSION_POOL[idx % SESSION_POOL.length]
+    : null
 
   let result = null
-
-  // Try up to 4 times with increasing delays
   for (let attempt = 0; attempt < 4; attempt++) {
     if (attempt > 0) {
       const delay = attempt * 2000
-      console.log(`  Retry ${attempt}/3 (waiting ${delay / 1000}s)...`)
+      console.log(`  Retry ${attempt}/3 (${delay / 1000}s delay)...`)
       await sleep(delay)
     }
-
-    result = await fetchInstagramPosts(username, count, includeImages, proxyConfiguration, attempt)
+    result = await fetchInstagramPosts(username, count, includeImages, proxyConfiguration, attempt, sessionForUser)
     if (result) break
   }
 
   if (result) {
-    console.log(`  ✅ Found ${result.posts.length} posts for @${username}`)
+    console.log(`  ✅ Found ${result.posts.length} posts`)
     for (const post of result.posts) {
-      await Actor.pushData({
-        username,
-        full_name: result.full_name,
-        followers: result.followers,
-        ...post
-      })
+      await Actor.pushData({ username, full_name: result.full_name, followers: result.followers, ...post })
     }
   } else {
-    console.log(`  ❌ Failed to fetch @${username}`)
-    await Actor.pushData({
-      username,
-      error: 'Could not fetch. Account may be private or rate limited.',
-      fetched_at: new Date().toISOString()
-    })
+    console.log(`  ❌ Failed — add sessionId to input for reliable results`)
+    await Actor.pushData({ username, error: 'Failed. Add sessionId for reliable access.', fetched_at: new Date().toISOString() })
   }
 
-  if (usernames.indexOf(username) < usernames.length - 1) {
-    await sleep(2000)
-  }
+  if (idx < usernames.length - 1) await sleep(2000)
 }
 
 console.log('\n✅ Done!')
 await Actor.exit()
 
-// ─── Fetch Instagram Posts ────────────────────────────────
-async function fetchInstagramPosts(username, count, includeImages, proxyConfig, attempt) {
+// ─── Fetch Posts ──────────────────────────────────────────
+async function fetchInstagramPosts(username, count, includeImages, proxyConfig, attempt, sessionId) {
   try {
-    // Rotate user agent and app ID based on attempt
-    const appIdIndex = attempt % IG_APP_IDS.length
-    const uaIndex = attempt % USER_AGENTS.length
-
-    // Get fresh cookies first
-    const cookies = await getInstagramCookies(proxyConfig, uaIndex)
-
-    // Try each App ID
+    const cookies = await getInstagramCookies(proxyConfig, attempt, sessionId)
     for (let i = 0; i < IG_APP_IDS.length; i++) {
-      const appId = IG_APP_IDS[(appIdIndex + i) % IG_APP_IDS.length]
-      const ua = USER_AGENTS[(uaIndex + i) % USER_AGENTS.length]
-
+      const appId = IG_APP_IDS[(attempt + i) % IG_APP_IDS.length]
+      const ua = USER_AGENTS[(attempt + i) % USER_AGENTS.length]
       try {
-        const user = await fetchInstagramUser(username, cookies, appId, ua, proxyConfig)
+        const user = await fetchUser(username, cookies, appId, ua, proxyConfig)
         if (!user) continue
-
-        const posts = extractPosts(user, count, includeImages)
         return {
           full_name: user.full_name,
           followers: user.edge_followed_by?.count,
-          is_private: user.is_private,
-          posts
+          posts: extractPosts(user, count, includeImages)
         }
       } catch { continue }
     }
-
     return null
   } catch (err) {
     console.log(`  Error: ${err.message}`)
@@ -121,21 +109,18 @@ async function fetchInstagramPosts(username, count, includeImages, proxyConfig, 
   }
 }
 
-// Get fresh cookies with optional proxy
-async function getInstagramCookies(proxyConfig, uaIndex = 0) {
+// Get fresh cookies + inject sessionId if provided
+async function getInstagramCookies(proxyConfig, attempt = 0, sessionId = null) {
   try {
+    const ua = USER_AGENTS[attempt % USER_AGENTS.length]
     const options = {
       headers: {
-        'User-Agent': USER_AGENTS[uaIndex],
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'User-Agent': ua,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
       }
     }
 
-    // Add proxy if available
     if (proxyConfig) {
       try {
         const proxyUrl = await proxyConfig.newUrl()
@@ -143,27 +128,35 @@ async function getInstagramCookies(proxyConfig, uaIndex = 0) {
           const { ProxyAgent } = await import('undici')
           options.dispatcher = new ProxyAgent(proxyUrl)
         }
-      } catch { /* proxy failed, use direct */ }
+      } catch { }
     }
 
     const res = await fetch('https://www.instagram.com/', options)
     const setCookie = res.headers.get('set-cookie') || ''
-    const cookies = setCookie
+    let freshCookies = setCookie
       .split(/,(?=[^ ])/)
       .map(c => c.split(';')[0].trim())
       .filter(c => c.includes('='))
       .join('; ')
 
-    console.log(`  Cookies: ${cookies ? cookies.split(';').map(c => c.split('=')[0]).join(', ') : 'none'}`)
-    return cookies
+    // Inject sessionId — this bypasses rate limits!
+    if (sessionId) {
+      freshCookies = `sessionid=${sessionId}; ${freshCookies}`
+    }
+
+    const cookieNames = freshCookies.split(';').map(c => c.trim().split('=')[0]).filter(Boolean)
+    console.log(`  Cookies: ${cookieNames.join(', ')}`)
+    return freshCookies
+
   } catch (err) {
-    console.log(`  Cookie fetch error: ${err.message}`)
-    return ''
+    console.log(`  Cookie error: ${err.message}`)
+    // Still return sessionId even if homepage fetch fails
+    return sessionId ? `sessionid=${sessionId}` : ''
   }
 }
 
-// Fetch Instagram user profile
-async function fetchInstagramUser(username, cookies, appId, ua, proxyConfig) {
+// Fetch user profile from Instagram API
+async function fetchUser(username, cookies, appId, ua, proxyConfig) {
   const options = {
     headers: {
       'X-IG-App-ID': appId,
@@ -175,7 +168,6 @@ async function fetchInstagramUser(username, cookies, appId, ua, proxyConfig) {
     }
   }
 
-  // Add proxy if available
   if (proxyConfig) {
     try {
       const proxyUrl = await proxyConfig.newUrl()
@@ -183,7 +175,7 @@ async function fetchInstagramUser(username, cookies, appId, ua, proxyConfig) {
         const { ProxyAgent } = await import('undici')
         options.dispatcher = new ProxyAgent(proxyUrl)
       }
-    } catch { /* use direct */ }
+    } catch { }
   }
 
   const res = await fetch(
@@ -192,18 +184,17 @@ async function fetchInstagramUser(username, cookies, appId, ua, proxyConfig) {
   )
 
   if (!res.ok) {
-    console.log(`  API status: ${res.status} (appId: ${appId})`)
+    console.log(`  Status: ${res.status} (${appId.slice(0, 6)}...)`)
     return null
   }
 
   const text = await res.text()
-  if (!text || text.trim() === '') return null
-
+  if (!text?.trim()) return null
   const data = JSON.parse(text)
   return data?.data?.user || null
 }
 
-// Extract posts
+// Extract posts from user data
 function extractPosts(user, count, includeImages) {
   const edges = user.edge_owner_to_timeline_media?.edges || []
   return edges
@@ -211,8 +202,7 @@ function extractPosts(user, count, includeImages) {
     .slice(0, count)
     .map(e => {
       const node = e.node
-      const captionEdges = node.edge_media_to_caption?.edges || []
-      const caption = captionEdges.length > 0 ? captionEdges[0].node.text : ''
+      const caption = node.edge_media_to_caption?.edges?.[0]?.node?.text || ''
       return {
         post_id: node.id,
         shortcode: node.shortcode,

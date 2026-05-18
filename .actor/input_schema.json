@@ -26,6 +26,20 @@
       "default": false,
       "editor": "checkbox"
     },
+    "sessionId": {
+      "title": "Instagram Session ID",
+      "type": "string",
+      "description": "Your Instagram sessionid cookie. Required for reliable results on datacenter IPs. Get it from: Chrome → F12 → Application → Cookies → instagram.com → sessionid",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "sessionIds": {
+      "title": "Multiple Session IDs (for rotation)",
+      "type": "array",
+      "description": "Add 2-3 Instagram sessionid values for rotation — avoids rate limits when processing many accounts",
+      "editor": "stringList",
+      "isSecret": true
+    },
     "proxyConfig": {
       "title": "Proxy Configuration",
       "type": "object",
